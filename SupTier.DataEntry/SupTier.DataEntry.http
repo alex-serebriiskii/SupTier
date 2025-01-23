@@ -1,0 +1,6 @@
+@SupTier.DataEntry_HostAddress = http://localhost:5120
+
+GET {{SupTier.DataEntry_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

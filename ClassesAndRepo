@@ -1,0 +1,143 @@
+using System.Collections.Generic;
+
+namespace YourNamespace.Models
+{
+    public class Supplement
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+    }
+
+    public class Application
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+    }
+
+    public class Tier
+    {
+        public int Id { get; set; }
+        public string Description { get; set; }
+    }
+
+    public class Evidence
+    {
+        public int Id { get; set; }
+        public int SupplementApplicationId { get; set; }
+        public string Link { get; set; }
+    }
+
+    public class SupplementApplication
+    {
+        public int Id { get; set; }
+        public int SupplementId { get; set; }
+        public int ApplicationId { get; set; }
+        public int TierId { get; set; }
+        public string Info { get; set; }
+
+        // Navigation properties
+        public virtual Supplement Supplement { get; set; }
+        public virtual Application Application { get; set; }
+        public virtual Tier Tier { get; set; }
+        public virtual ICollection<Evidence> EvidenceList { get; set; }
+    }
+}
+
+using Dapper;
+using System.Collections.Generic;
+using System.Data;
+using System.Data.SqlClient;
+using System.Linq;
+using YourNamespace.Models;
+
+namespace YourNamespace.Repositories
+{
+    public class SupplementApplicationRepository
+    {
+        private readonly string _connectionString;
+
+        public SupplementApplicationRepository(string connectionString)
+        {
+            _connectionString = connectionString;
+        }
+
+        private IDbConnection Connection => new SqlConnection(_connectionString);
+
+        public IEnumerable<SupplementApplication> GetAll()
+        {
+            string sql = @"
+                SELECT sa.*, s.*, a.*, t.*, e.*
+                FROM SupplementApplication sa
+                INNER JOIN Supplement s ON sa.SupplementId = s.Id
+                INNER JOIN Application a ON sa.ApplicationId = a.Id
+                INNER JOIN Tier t ON sa.TierId = t.Id
+                LEFT JOIN Evidence e ON e.SupplementApplicationId = sa.Id";
+
+            var lookup = new Dictionary<int, SupplementApplication>();
+
+            using (var db = Connection)
+            {
+                db.Query<SupplementApplication, Supplement, Application, Tier, Evidence, SupplementApplication>(
+                    sql,
+                    (sa, s, a, t, e) =>
+                    {
+                        if (!lookup.TryGetValue(sa.Id, out var supplementApplication))
+                        {
+                            supplementApplication = sa;
+                            supplementApplication.Supplement = s;
+                            supplementApplication.Application = a;
+                            supplementApplication.Tier = t;
+                            supplementApplication.EvidenceList = new List<Evidence>();
+                            lookup.Add(sa.Id, supplementApplication);
+                        }
+
+                        if (e != null)
+                        {
+                            supplementApplication.EvidenceList.Add(e);
+                        }
+
+                        return supplementApplication;
+                    },
+                    splitOn: "Id,Id,Id,Id"
+                );
+            }
+
+            return lookup.Values;
+        }
+
+        public void Add(SupplementApplication supplementApplication)
+        {
+            string sql = @"
+                INSERT INTO SupplementApplication (SupplementId, ApplicationId, TierId, Info)
+                VALUES (@SupplementId, @ApplicationId, @TierId, @Info);
+                SELECT CAST(SCOPE_IDENTITY() as int);";
+
+            using (var db = Connection)
+            {
+                var id = db.Query<int>(sql, supplementApplication).Single();
+                supplementApplication.Id = id;
+            }
+
+            if (supplementApplication.EvidenceList != null)
+            {
+                foreach (var evidence in supplementApplication.EvidenceList)
+                {
+                    evidence.SupplementApplicationId = supplementApplication.Id;
+                    AddEvidence(evidence);
+                }
+            }
+        }
+
+        private void AddEvidence(Evidence evidence)
+        {
+            string sql = @"
+                INSERT INTO Evidence (SupplementApplicationId, Link)
+                VALUES (@SupplementApplicationId, @Link)";
+
+            using (var db = Connection)
+            {
+                db.Execute(sql, evidence);
+            }
+        }
+    }
+}
